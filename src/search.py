@@ -1,3 +1,17 @@
+import os
+
+from dotenv import load_dotenv
+from langchain_core.prompts import PromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_postgres import PGVector
+
+load_dotenv()
+
+DATABASE_URL = os.environ["DATABASE_URL"]
+COLLECTION_NAME = os.environ["PG_VECTOR_COLLECTION_NAME"]
+EMBEDDING_MODEL = os.getenv("GOOGLE_EMBEDDING_MODEL", "models/gemini-embedding-001")
+LLM_MODEL = os.getenv("GOOGLE_LLM_MODEL", "gemini-2.5-flash-lite")
+
 PROMPT_TEMPLATE = """
 CONTEXTO:
 {contexto}
@@ -25,5 +39,19 @@ PERGUNTA DO USUÁRIO:
 RESPONDA A "PERGUNTA DO USUÁRIO"
 """
 
+
 def search_prompt(question=None):
-    pass
+    store = PGVector(
+        embeddings=GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL),
+        collection_name=COLLECTION_NAME,
+        connection=DATABASE_URL,
+        use_jsonb=True,
+    )
+    chain = PromptTemplate.from_template(PROMPT_TEMPLATE) | ChatGoogleGenerativeAI(model=LLM_MODEL)
+
+    def ask(q):
+        results = store.similarity_search_with_score(q, k=10)
+        contexto = "\n\n".join(d.page_content.strip() for d, _ in results)
+        return chain.invoke({"contexto": contexto, "pergunta": q}).content.strip()
+
+    return ask(question) if question else ask
